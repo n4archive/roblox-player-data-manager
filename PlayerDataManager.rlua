@@ -1,0 +1,92 @@
+﻿local function run(ats,ach)
+	
+local function achandler(Player,PlayerData,action)
+	return ach(Player,PlayerData,action)
+end
+local DataStoreService=game:GetService("DataStoreService")
+local DataStore=DataStoreService:GetDataStore("Player_Data")
+--[[
+	A player is leaving the game. Save their data.
+--]]
+local function save(Player)
+	
+	if Player.CanSaveData.Value==false then return end --Player data can't be saved, so do nothing.
+	
+	local PlayerData=achandler(Player,nil,2)
+	
+	local DataWriteSuccess,ErrorMessage=pcall(function() --Once again, we are safely calling a web request. If it fails, we can safely handle it.
+		DataStore:SetAsync(tostring(Player.UserId),PlayerData)
+	end)	
+	
+	if not DataWriteSuccess then --Uh oh, player data didnt' save. Handle this error.
+		--We will attempt to save the player's data 5 more times. If it fails after 5 times, 
+		--we will abort the save and the player's data will not be changed in the datastores.
+		
+		local Retry_Count=0
+		
+		while Retry_Count<6 do
+			wait(60) --Wait 1 minute between each retry
+			local Succeded,Error=pcall(function()
+				DataStore:SetAsync(tostring(Player.UserId),PlayerData)
+			end)
+			if Succeded then break end --HURRAY, DATA SAVED!
+			Retry_Count=Retry_Count+1
+		end
+		
+	end
+	
+	end
+	game.Players.PlayerAdded:connect(function(Player)
+	local PlayerData; --Will hold the player's data when fetched from the datastore.	
+	
+	--[[
+		Set up the player's leaderstats and add them to the ROBLOX leaderboard.
+	--]]
+	local Stats=Instance.new('Model')
+	Stats.Name="playerdata"
+	Stats.Parent=Player
+	
+	--[[
+		We are fetching the player's data, if it exists.
+		If it does not exist, we will create new data for the player as they
+		must logically be new to the game.
+	--]]
+	local CanSave=Instance.new('BoolValue',Player) --This is used to determine whether or not the 
+	                                               --player's data can be saved when they leave.
+	CanSave.Name="CanSaveData"
+	CanSave.Value=true
+	
+	local DataFetchSuccess,ErrorMessage=pcall(function() --We are wrapping the datastore request in a protected function, as web requests can error. 
+	                                                     --Safely handling datastore errors can prevent player data corruption.
+	PlayerData=DataStore:GetAsync(tostring(Player.UserId))
+	end)
+	
+	if DataFetchSuccess then --The datastore GET request was successful!
+		
+		if PlayerData~=nil then --The player's data exists, they have played this game before. Put their data into the leaderboard.
+			achandler(Player,PlayerData,0)
+		else --The player's data does not exist, they're new to the game. Create their data on the leaderboard.
+			achandler(Player,PlayerData,1)
+		end
+		local function autosave()
+			while wait() do
+				save(Player)
+				wait(ats)
+			end
+		end
+	else --The GET request failed, datastores could be down.
+		
+		--[[
+			There are many ways to handle datastore failures. In this case, we will kick the player, 
+			letting them know their data failed to load. 
+			Because their data wasn't loaded, we won't save their data when they leave.
+		]]--
+	
+		Player.CanSaveData.Value=false
+		Player:Kick("Your data failed to load! Please rejoin.")	
+			
+	end
+end)
+	game.Players.PlayerRemoving:connect(save)
+end
+return run
